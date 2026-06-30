@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Placement Portal Application V2
 
 A campus recruitment management system built with Flask (API) + Vue 3 (SPA) + Bootstrap + SQLite.
@@ -43,3 +44,7 @@ Runs on `http://localhost:5173`.
 
 ## Issues encountered
 - None yet — log issues here as they come up during testing.
+=======
+# PPM
+demo application for placement management
+>>>>>>> 178a14a89b4fa8f43dcb7c9c9a00154929b01533
