@@ -1,0 +1,16 @@
+body {
+  background-color: #f5f6fa;
+}
+
+.navbar-brand {
+  font-weight: 700;
+}
+
+.card {
+  border: none;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.status-badge {
+  font-size: 0.8rem;
+}
