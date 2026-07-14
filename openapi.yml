@@ -1,0 +1,705 @@
+openapi: 3.0.3
+info:
+  title: Placement Portal Application (PPA) V2 API
+  description: >
+    Campus recruitment management API. Three roles — admin, company, student —
+    share JWT-based auth on the same endpoints, gated by role.
+    Admin is pre-seeded (`admin@ppa.com` / `admin123`); companies must be
+    approved by an admin before they can log in.
+  version: "1.0.0"
+
+servers:
+  - url: http://localhost:5000/api
+    description: Local / Docker Compose
+
+tags:
+  - name: Auth
+  - name: Admin
+  - name: Company
+  - name: Student
+  - name: Drives
+
+security:
+  - bearerAuth: []
+
+paths:
+  # ---------------- AUTH ----------------
+  /auth/register/student:
+    post:
+      tags: [Auth]
+      summary: Register a new student (logs in immediately after)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password, name]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, format: password }
+                name: { type: string }
+                branch: { type: string }
+                cgpa: { type: number }
+                year: { type: integer }
+                contact: { type: string }
+                skills: { type: string, description: "Comma-separated" }
+      responses:
+        "201": { description: Registered successfully }
+        "400": { description: Missing fields or email already registered }
+
+  /auth/register/company:
+    post:
+      tags: [Auth]
+      summary: Register a new company (must be approved by admin before login)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password, name]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, format: password }
+                name: { type: string }
+                industry: { type: string }
+                hr_contact: { type: string }
+                website: { type: string }
+      responses:
+        "201": { description: "Registered, awaiting admin approval" }
+        "400": { description: Missing fields or email already registered }
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Log in (any role) and receive a JWT
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, format: password }
+      responses:
+        "200":
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token: { type: string }
+                  user: { $ref: "#/components/schemas/User" }
+        "401": { description: Invalid email or password }
+        "403": { description: "Account deactivated, or company not yet approved" }
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Get the current logged-in user's profile
+      responses:
+        "200":
+          description: Current user (with nested student/company profile if applicable)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "404": { description: User not found }
+
+  # ---------------- ADMIN ----------------
+  /admin/dashboard:
+    get:
+      tags: [Admin]
+      summary: Admin stats overview
+      responses:
+        "200":
+          description: Counts of students, companies, drives, applications, and pending items
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total_students: { type: integer }
+                  total_companies: { type: integer }
+                  total_drives: { type: integer }
+                  total_applications: { type: integer }
+                  pending_companies: { type: integer }
+                  pending_drives: { type: integer }
+
+  /admin/companies:
+    get:
+      tags: [Admin]
+      summary: List/search all companies
+      parameters:
+        - $ref: "#/components/parameters/SearchParam"
+      responses:
+        "200":
+          description: List of companies
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Company" }
+
+  /admin/companies/{company_id}/approve:
+    post:
+      tags: [Admin]
+      summary: Approve a pending company
+      parameters: [{ $ref: "#/components/parameters/CompanyId" }]
+      responses:
+        "200": { description: Company approved, content: { application/json: { schema: { $ref: "#/components/schemas/Company" } } } }
+        "404": { description: Company not found }
+
+  /admin/companies/{company_id}/reject:
+    post:
+      tags: [Admin]
+      summary: Reject a pending company
+      parameters: [{ $ref: "#/components/parameters/CompanyId" }]
+      responses:
+        "200": { description: Company rejected }
+        "404": { description: Company not found }
+
+  /admin/companies/{company_id}:
+    delete:
+      tags: [Admin]
+      summary: Permanently remove a company (and its user account)
+      parameters: [{ $ref: "#/components/parameters/CompanyId" }]
+      responses:
+        "200": { description: Company removed }
+        "404": { description: Company not found }
+
+  /admin/companies/{company_id}/toggle-active:
+    post:
+      tags: [Admin]
+      summary: Blacklist / reactivate a company
+      parameters: [{ $ref: "#/components/parameters/CompanyId" }]
+      responses:
+        "200": { description: Company active status toggled }
+        "404": { description: Company not found }
+
+  /admin/students:
+    get:
+      tags: [Admin]
+      summary: List/search all students
+      parameters:
+        - $ref: "#/components/parameters/SearchParam"
+      responses:
+        "200":
+          description: List of students
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Student" }
+
+  /admin/students/{student_id}/toggle-active:
+    post:
+      tags: [Admin]
+      summary: Blacklist / reactivate a student
+      parameters:
+        - name: student_id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200": { description: Student active status toggled }
+        "404": { description: Student not found }
+
+  /admin/drives:
+    get:
+      tags: [Admin]
+      summary: List all drives regardless of status
+      responses:
+        "200":
+          description: List of drives
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Drive" }
+
+  /admin/drives/{drive_id}/approve:
+    post:
+      tags: [Admin]
+      summary: Approve a pending drive
+      parameters: [{ $ref: "#/components/parameters/DriveId" }]
+      responses:
+        "200": { description: Drive approved }
+        "404": { description: Drive not found }
+
+  /admin/drives/{drive_id}/reject:
+    post:
+      tags: [Admin]
+      summary: Reject a pending drive
+      parameters: [{ $ref: "#/components/parameters/DriveId" }]
+      responses:
+        "200": { description: Drive rejected }
+        "404": { description: Drive not found }
+
+  /admin/drives/{drive_id}:
+    delete:
+      tags: [Admin]
+      summary: Permanently remove a drive
+      parameters: [{ $ref: "#/components/parameters/DriveId" }]
+      responses:
+        "200": { description: Drive removed }
+        "404": { description: Drive not found }
+
+  /admin/applications:
+    get:
+      tags: [Admin]
+      summary: List all applications across all drives
+      responses:
+        "200":
+          description: List of applications
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Application" }
+
+  # ---------------- COMPANY ----------------
+  /company/profile:
+    get:
+      tags: [Company]
+      summary: Get own company profile
+      responses:
+        "200": { description: Company profile, content: { application/json: { schema: { $ref: "#/components/schemas/Company" } } } }
+        "404": { description: Company profile not found }
+    put:
+      tags: [Company]
+      summary: Update own company profile
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                industry: { type: string }
+                hr_contact: { type: string }
+                website: { type: string }
+      responses:
+        "200": { description: Updated company profile }
+        "404": { description: Company profile not found }
+
+  /company/dashboard:
+    get:
+      tags: [Company]
+      summary: Company dashboard — own drives + applicant totals
+      responses:
+        "200":
+          description: Dashboard data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  company: { $ref: "#/components/schemas/Company" }
+                  total_drives: { type: integer }
+                  total_applicants: { type: integer }
+                  drives:
+                    type: array
+                    items: { $ref: "#/components/schemas/Drive" }
+
+  /company/drives:
+    get:
+      tags: [Company]
+      summary: List drives posted by the logged-in company
+      responses:
+        "200":
+          description: List of own drives
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Drive" }
+    post:
+      tags: [Company]
+      summary: Create a new drive (goes in as "Pending" for admin approval)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DriveInput" }
+      responses:
+        "201": { description: Drive created (pending approval) }
+        "403": { description: Company not yet approved by admin }
+        "404": { description: Company profile not found }
+
+  /company/drives/{drive_id}:
+    put:
+      tags: [Company]
+      summary: Update / close one of the company's own drives
+      parameters: [{ $ref: "#/components/parameters/DriveId" }]
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DriveInput" }
+      responses:
+        "200": { description: Updated drive }
+        "403": { description: Not your drive }
+        "404": { description: Drive not found }
+
+  /company/drives/{drive_id}/applicants:
+    get:
+      tags: [Company]
+      summary: List applicants for one of the company's own drives
+      parameters: [{ $ref: "#/components/parameters/DriveId" }]
+      responses:
+        "200":
+          description: List of applications for this drive
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Application" }
+        "403": { description: Not your drive }
+        "404": { description: Drive not found }
+
+  /company/applications/{application_id}:
+    put:
+      tags: [Company]
+      summary: Update an applicant's status/feedback/interview time
+      parameters:
+        - name: application_id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum: [Applied, Shortlisted, Interview, Offer, Rejected, Placed]
+                feedback: { type: string }
+                interview_datetime: { type: string, format: date-time }
+      responses:
+        "200": { description: Updated application (a Placement record is auto-created when status becomes "Placed") }
+        "400": { description: Invalid status }
+        "403": { description: Not your application to manage }
+        "404": { description: Application not found }
+
+  /company/export-csv:
+    post:
+      tags: [Company]
+      summary: Kick off an async CSV export of this company's applicants
+      responses:
+        "202":
+          description: Export job queued
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TaskQueued" }
+        "404": { description: Company profile not found }
+        "503": { description: Could not queue job (Redis/Celery unreachable) }
+
+  /company/export-csv/{task_id}:
+    get:
+      tags: [Company]
+      summary: Poll the status of a queued CSV export
+      parameters: [{ $ref: "#/components/parameters/TaskId" }]
+      responses:
+        "200":
+          description: Task status
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TaskStatus" }
+
+  # ---------------- STUDENT ----------------
+  /student/profile:
+    get:
+      tags: [Student]
+      summary: Get own student profile
+      responses:
+        "200": { description: Student profile, content: { application/json: { schema: { $ref: "#/components/schemas/Student" } } } }
+        "404": { description: Student profile not found }
+    put:
+      tags: [Student]
+      summary: Update own student profile
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                branch: { type: string }
+                cgpa: { type: number }
+                year: { type: integer }
+                contact: { type: string }
+                skills: { type: string }
+                resume_filename: { type: string }
+      responses:
+        "200": { description: Updated student profile }
+        "404": { description: Student profile not found }
+
+  /student/dashboard:
+    get:
+      tags: [Student]
+      summary: Student dashboard — profile + own applications
+      responses:
+        "200":
+          description: Dashboard data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  student: { $ref: "#/components/schemas/Student" }
+                  total_applications: { type: integer }
+                  applications:
+                    type: array
+                    items: { $ref: "#/components/schemas/Application" }
+        "404": { description: Student profile not found }
+
+  /student/drives/{drive_id}/apply:
+    post:
+      tags: [Student]
+      summary: Apply to an approved drive (checks eligibility + duplicates)
+      parameters: [{ $ref: "#/components/parameters/DriveId" }]
+      responses:
+        "201": { description: Application created, content: { application/json: { schema: { $ref: "#/components/schemas/Application" } } } }
+        "400": { description: Already applied }
+        "403": { description: "Drive not open, or student ineligible (CGPA/branch/year)" }
+        "404": { description: Student profile or drive not found }
+
+  /student/applications:
+    get:
+      tags: [Student]
+      summary: List the logged-in student's own applications
+      responses:
+        "200":
+          description: List of applications
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Application" }
+        "404": { description: Student profile not found }
+
+  /student/placements:
+    get:
+      tags: [Student]
+      summary: List the logged-in student's placement history
+      responses:
+        "200":
+          description: List of placements
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Placement" }
+        "404": { description: Student profile not found }
+
+  /student/export-csv:
+    post:
+      tags: [Student]
+      summary: Kick off an async CSV export of this student's application history
+      responses:
+        "202":
+          description: Export job queued
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TaskQueued" }
+        "404": { description: Student profile not found }
+        "503": { description: Could not queue job (Redis/Celery unreachable) }
+
+  /student/export-csv/{task_id}:
+    get:
+      tags: [Student]
+      summary: Poll the status of a queued CSV export
+      parameters: [{ $ref: "#/components/parameters/TaskId" }]
+      responses:
+        "200":
+          description: Task status
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TaskStatus" }
+
+  # ---------------- DRIVES (shared, read-only) ----------------
+  /drives:
+    get:
+      tags: [Drives]
+      summary: List approved/open drives (students and admin)
+      parameters:
+        - $ref: "#/components/parameters/SearchParam"
+      responses:
+        "200":
+          description: List of approved drives
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Drive" }
+
+  /drives/{drive_id}:
+    get:
+      tags: [Drives]
+      summary: Get a single drive's details
+      parameters: [{ $ref: "#/components/parameters/DriveId" }]
+      responses:
+        "200":
+          description: Drive details
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Drive" }
+        "404": { description: Drive not found }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >
+        Obtain via POST /auth/login, then send as
+        `Authorization: Bearer <token>` on every other request.
+
+  parameters:
+    SearchParam:
+      name: search
+      in: query
+      description: Free-text search (company/title/skills/name/email depending on endpoint)
+      schema: { type: string }
+    CompanyId:
+      name: company_id
+      in: path
+      required: true
+      schema: { type: integer }
+    DriveId:
+      name: drive_id
+      in: path
+      required: true
+      schema: { type: integer }
+    TaskId:
+      name: task_id
+      in: path
+      required: true
+      description: Celery task ID returned by the export-csv trigger endpoint
+      schema: { type: string }
+
+  schemas:
+    User:
+      type: object
+      properties:
+        id: { type: integer }
+        email: { type: string }
+        role: { type: string, enum: [admin, company, student] }
+        is_active: { type: boolean }
+        profile:
+          description: Present on /auth/me — nested Student or Company object
+          type: object
+
+    Student:
+      type: object
+      properties:
+        id: { type: integer }
+        user_id: { type: integer }
+        name: { type: string }
+        branch: { type: string }
+        cgpa: { type: number }
+        year: { type: integer }
+        contact: { type: string }
+        skills: { type: string, description: "Comma-separated" }
+        resume_filename: { type: string }
+        email: { type: string }
+        is_active: { type: boolean }
+
+    Company:
+      type: object
+      properties:
+        id: { type: integer }
+        user_id: { type: integer }
+        name: { type: string }
+        industry: { type: string }
+        hr_contact: { type: string }
+        website: { type: string }
+        approval_status: { type: string, enum: [Pending, Approved, Rejected] }
+        email: { type: string }
+        is_active: { type: boolean }
+
+    Drive:
+      type: object
+      properties:
+        id: { type: integer }
+        company_id: { type: integer }
+        company_name: { type: string }
+        job_title: { type: string }
+        job_description: { type: string }
+        branch_eligibility: { type: string, description: "Comma-separated, or 'Any'" }
+        min_cgpa: { type: number }
+        eligible_year: { type: integer }
+        salary: { type: string }
+        skills_required: { type: string }
+        application_deadline: { type: string, format: date }
+        status: { type: string, enum: [Pending, Approved, Rejected, Closed] }
+        applicant_count: { type: integer }
+
+    DriveInput:
+      type: object
+      properties:
+        job_title: { type: string }
+        job_description: { type: string }
+        branch_eligibility: { type: string }
+        min_cgpa: { type: number }
+        eligible_year: { type: integer }
+        salary: { type: string }
+        skills_required: { type: string }
+        application_deadline: { type: string, format: date }
+        status: { type: string, enum: [Closed], description: "Only used to close a drive" }
+
+    Application:
+      type: object
+      properties:
+        id: { type: integer }
+        student_id: { type: integer }
+        student_name: { type: string }
+        drive_id: { type: integer }
+        job_title: { type: string }
+        company_name: { type: string }
+        application_date: { type: string, format: date-time }
+        status: { type: string, enum: [Applied, Shortlisted, Interview, Offer, Rejected, Placed] }
+        feedback: { type: string }
+        interview_datetime: { type: string, format: date-time }
+
+    Placement:
+      type: object
+      properties:
+        id: { type: integer }
+        application_id: { type: integer }
+        student_id: { type: integer }
+        company_id: { type: integer }
+        position: { type: string }
+        salary: { type: string }
+        joining_date: { type: string, format: date }
+
+    TaskQueued:
+      type: object
+      properties:
+        task_id: { type: string }
+        message: { type: string }
+
+    TaskStatus:
+      type: object
+      properties:
+        state: { type: string, enum: [PENDING, STARTED, SUCCESS, FAILURE, RETRY] }
+        result:
+          description: Present when state is SUCCESS
+          type: object
+        info:
+          description: Present when state is not SUCCESS/PENDING (e.g. error info)
+          type: string
+
+    Error:
+      type: object
+      properties:
+        error: { type: string }
